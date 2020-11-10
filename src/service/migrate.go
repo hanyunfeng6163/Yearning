@@ -28,11 +28,12 @@ func DataInit(o *parser.AuditRole, other *model.Other, ldap *model.Ldap, message
 	l, _ := json.Marshal(ldap)
 	m, _ := json.Marshal(message)
 	ak, _ := json.Marshal(a)
+	group, _ := json.Marshal([]string{"admin"})
 	model.DB().Debug().Create(&model.CoreAccount{
 		Username:   "admin",
 		RealName:   "超级管理员",
 		Password:   lib.DjangoEncrypt("Yearning_admin", string(lib.GetRandom())),
-		Rule:       "admin",
+		Rule:       "super",
 		Department: "DBA",
 		Email:      "",
 	})
@@ -44,7 +45,11 @@ func DataInit(o *parser.AuditRole, other *model.Other, ldap *model.Ldap, message
 		Ldap:          l,
 	})
 	model.DB().Debug().Create(&model.CoreGrained{
-		Username:    "admin",
+		Username: "admin",
+		Group:    group,
+	})
+	model.DB().Debug().Create(&model.CoreRoleGroup{
+		Name:        "admin",
 		Permissions: ak,
 	})
 }
@@ -60,8 +65,10 @@ func Migrate() {
 		model.DB().CreateTable(&model.CoreRollback{})
 		model.DB().CreateTable(&model.CoreQueryRecord{})
 		model.DB().CreateTable(&model.CoreQueryOrder{})
-		model.DB().CreateTable(&model.CoreGroupOrder{})
-
+		model.DB().CreateTable(&model.CoreAutoTask{})
+		model.DB().CreateTable(&model.CoreRoleGroup{})
+		model.DB().CreateTable(&model.CoreWorkflowTpl{})
+		model.DB().AutoMigrate(&model.CoreWorkflowDetail{})
 		o := parser.AuditRole{
 			DMLInsertColumns:               false,
 			DMLMaxInsertRows:               10,
@@ -86,8 +93,6 @@ func Migrate() {
 			DDLPrimaryKeyMust:              false,
 			MaxTableNameLen:                10,
 			MaxAffectRows:                  1000,
-			EnableSetCollation:             false,
-			EnableSetCharset:               false,
 			SupportCharset:                 "",
 			SupportCollation:               "",
 			CheckIdentifier:                false,
@@ -102,6 +107,9 @@ func Migrate() {
 			OscCriticalThreadRunning:       20,
 			OscRecursionMethod:             "processlist",
 			OscCheckInterval:               1,
+			AllowCreatePartition:           false,
+			AllowCreateView:                false,
+			AllowSpecialType:               false,
 		}
 
 		other := model.Other{
@@ -138,15 +146,10 @@ func Migrate() {
 		}
 
 		a := model.PermissionList{
-			DDL:         "1",
-			DML:         "1",
-			Query:       "1",
 			DDLSource:   []string{},
 			DMLSource:   []string{},
 			QuerySource: []string{},
 			Auditor:     []string{},
-			User:        "1",
-			Base:        "1",
 		}
 		time.Sleep(2)
 		DataInit(&o, &other, &ldap, &message, &a)
@@ -157,7 +160,7 @@ func Migrate() {
 	}
 }
 
-func UpdateSoft() {
+func UpdateData() {
 	fmt.Println("检查更新.......")
 	model.DB().AutoMigrate(&model.CoreAccount{})
 	model.DB().AutoMigrate(&model.CoreDataSource{})
@@ -168,11 +171,23 @@ func UpdateSoft() {
 	model.DB().AutoMigrate(&model.CoreRollback{})
 	model.DB().AutoMigrate(&model.CoreQueryRecord{})
 	model.DB().AutoMigrate(&model.CoreQueryOrder{})
-	model.DB().AutoMigrate(&model.CoreGroupOrder{})
 	model.DB().AutoMigrate(&model.CoreAutoTask{})
+	model.DB().AutoMigrate(&model.CoreRoleGroup{})
+	model.DB().AutoMigrate(&model.CoreWorkflowTpl{})
+	model.DB().AutoMigrate(&model.CoreWorkflowDetail{})
 	fmt.Println("数据已更新!")
 }
 
 func DelCol() {
 	model.DB().Model(&model.CoreQueryOrder{}).DropColumn("source")
+}
+
+func MargeRuleGroup() {
+	fmt.Println("破坏性变更修复…………")
+	model.DB().Model(&model.CoreSqlOrder{}).DropColumn("rejected")
+	model.DB().Model(&model.CoreGrained{}).DropColumn("permissions")
+	model.DB().Model(&model.CoreGrained{}).DropColumn("rule")
+	model.DB().Model(model.CoreAccount{}).Where("rule = ?", "perform").Update(&model.CoreAccount{Rule: "admin"})
+	model.DB().Model(model.CoreAccount{}).Where("username = ?", "admin").Update(&model.CoreAccount{Rule: "super"})
+	fmt.Println("修复成功!")
 }

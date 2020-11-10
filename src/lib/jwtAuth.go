@@ -16,8 +16,8 @@ package lib
 import (
 	"Yearning-go/src/model"
 	"errors"
+	"github.com/cookieY/yee"
 	"github.com/dgrijalva/jwt-go"
-	"github.com/labstack/echo/v4"
 	"time"
 )
 
@@ -26,7 +26,7 @@ func JwtAuth(username string, role string) (t string, err error) {
 	claims := token.Claims.(jwt.MapClaims)
 	claims["name"] = username
 	claims["role"] = role
-	claims["exp"] = time.Now().Add(time.Hour * 4).Unix()
+	claims["exp"] = time.Now().Add(time.Hour * 8).Unix()
 	t, err = token.SignedString([]byte(model.JWT))
 	if err != nil {
 		return "", errors.New("JWT Generate Failure")
@@ -34,8 +34,8 @@ func JwtAuth(username string, role string) (t string, err error) {
 	return t, nil
 }
 
-func JwtParse(c echo.Context) (string, string) {
-	user := c.Get("user").(*jwt.Token)
+func JwtParse(c yee.Context) (string, string) {
+	user := c.Get("auth").(*jwt.Token)
 	claims := user.Claims.(jwt.MapClaims)
 	return claims["name"].(string), claims["role"].(string)
 }

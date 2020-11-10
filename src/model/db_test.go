@@ -6,9 +6,6 @@ import (
 	"testing"
 )
 
-func TestDbInfo_CreateTable(t *testing.T) {
-	D.CreateTable()
-}
 
 func TestJsonGet(t *testing.T) {
 	//var a GlobalConfiguration

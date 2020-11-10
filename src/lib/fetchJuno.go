@@ -1,17 +1,66 @@
 package lib
 
 import (
-	"Yearning-go/src/pool"
+	"Yearning-go/src/model"
 	pb "Yearning-go/src/proto"
 	"context"
-	"fmt"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"log"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
+var (
+	globalGRPCconns *grpc.ClientConn
+	lock            sync.Mutex
+	config          atomic.Value
+)
+
+func FetchGRPCConn() (*grpc.ClientConn, error) {
+	if c := config.Load(); c != nil {
+		if c.(*grpc.ClientConn).GetState() == connectivity.Ready {
+			return c.(*grpc.ClientConn), nil
+		}
+	}
+
+	lock.Lock()
+
+	defer lock.Unlock()
+
+	cli, err := newGrpcConn()
+
+	cli.Target()
+
+	if err != nil {
+		return nil, err
+	}
+
+	config.Store(cli)
+
+	return cli, nil
+}
+
+func newGrpcConn() (*grpc.ClientConn, error) {
+	conn, err := grpc.Dial(
+		model.Grpc,
+		grpc.WithInsecure(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return conn, nil
+}
+
 func TsClient(order *pb.LibraAuditOrder) ([]*pb.Record, error) {
 
-	conn, _ := pool.P.Get()
+	conn, err := FetchGRPCConn()
+
+	if err != nil {
+		return nil, err
+	}
+
 	c := pb.NewJunoClient(conn)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	r, err := c.OrderDeal(ctx, order)
@@ -21,7 +70,6 @@ func TsClient(order *pb.LibraAuditOrder) ([]*pb.Record, error) {
 	}
 	defer func() {
 		cancel()
-		_ = pool.P.Put(conn)
 	}()
 
 	return r.Record, nil
@@ -29,47 +77,66 @@ func TsClient(order *pb.LibraAuditOrder) ([]*pb.Record, error) {
 
 func ExDDLClient(order *pb.LibraAuditOrder) {
 	// Set up a connection to the server.
-	conn, _ := pool.P.Get()
+
+	conn, err := FetchGRPCConn()
+
+	if err != nil {
+		log.Println(err.Error())
+		return
+	}
+
 	c := pb.NewJunoClient(conn)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer func() {
 		cancel()
-		_ = pool.P.Put(conn)
 	}()
-	r, err := c.OrderDDLExec(ctx, order)
+	_, err = c.OrderDDLExec(ctx, order)
 	if err != nil {
-		log.Fatalf("could not connect: %v", err)
+		log.Printf("could not connect: %v", err)
+		MessagePush(order.WorkId, 4, "")
 	}
-	fmt.Println(r.Message)
+	MessagePush(order.WorkId, 1, "")
 }
 
 func ExDMLClient(order *pb.LibraAuditOrder) {
 
+	conn, err := FetchGRPCConn()
+
+	if err != nil {
+		log.Println(err.Error())
+		return
+	}
+
 	// Set up a connection to the server.
-	conn, _ := pool.P.Get()
 	c := pb.NewJunoClient(conn)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer func() {
 		cancel()
-		_ = pool.P.Put(conn)
 	}()
-	r, err := c.OrderDMLExec(ctx, order)
+	_, err = c.OrderDMLExec(ctx, order)
 	if err != nil {
 		log.Printf("could not connect: %v", err)
+		MessagePush(order.WorkId, 4, "")
 	}
-	fmt.Println(r.Message)
+	MessagePush(order.WorkId, 1, "")
 }
 
 func ExAutoTask(order *pb.LibraAuditOrder) bool {
 
-	// Set up a connection to the server.
-	conn, _ := pool.P.Get()
+	conn, err := FetchGRPCConn()
+
+	if err != nil {
+		log.Println(err.Error())
+		return false
+	}
+
 	c := pb.NewJunoClient(conn)
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+
 	defer func() {
 		cancel()
-		_ = pool.P.Put(conn)
 	}()
 	r, err := c.AutoTask(ctx, order)
 	if err != nil {
@@ -78,32 +145,56 @@ func ExAutoTask(order *pb.LibraAuditOrder) bool {
 	return r.Ok
 }
 
-func ExQuery(order *pb.LibraAuditOrder) *pb.InsulateWordList {
-	conn, _ := pool.P.Get()
+func ExQuery(order *pb.LibraAuditOrder) (*pb.InsulateWordList, error) {
+	conn, err := FetchGRPCConn()
+
+	if err != nil {
+		log.Println(err.Error())
+	}
 	c := pb.NewJunoClient(conn)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer func() {
 		cancel()
-		_ = pool.P.Put(conn)
 	}()
 	r, err := c.Query(ctx, order)
 	if err != nil {
-		log.Fatalf("could not connect: %v", err)
+		return r, err
+	}
+	return r, nil
+}
+
+func ExKillOsc(order *pb.LibraAuditOrder) *pb.Isok {
+	conn, err := FetchGRPCConn()
+
+	if err != nil {
+		log.Println(err.Error())
+	}
+	c := pb.NewJunoClient(conn)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer func() {
+		cancel()
+	}()
+	r, err := c.KillOsc(ctx, order)
+	if err != nil {
+		log.Printf("could not connect: %v", err)
 	}
 	return r
 }
 
-func ExKillOsc(order *pb.LibraAuditOrder) *pb.Isok {
-	conn, _ := pool.P.Get()
+func OverrideConfig(order *pb.LibraAuditOrder) *pb.Isok {
+	conn, err := FetchGRPCConn()
+
+	if err != nil {
+		log.Println(err.Error())
+	}
 	c := pb.NewJunoClient(conn)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer func() {
 		cancel()
-		_ = pool.P.Put(conn)
 	}()
-	r, err := c.KillOsc(ctx, order)
+	r, err := c.OverrideConfig(ctx, order)
 	if err != nil {
-		log.Fatalf("could not connect: %v", err)
+		log.Printf("could not connect: %v", err)
 	}
 	return r
 }

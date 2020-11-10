@@ -13,6 +13,11 @@
 
 package model
 
+import (
+	"google.golang.org/grpc"
+	"time"
+)
+
 type mysql struct {
 	Host     string
 	User     string
@@ -23,6 +28,8 @@ type mysql struct {
 
 type general struct {
 	SecretKey string
+	Host      string
+	Hours     time.Duration
 	GrpcAddr  string
 }
 
@@ -39,26 +46,15 @@ type Config struct {
 	Mysql   mysql
 }
 
-var InitPer = PermissionList{
-	DDL:         "0",
-	DML:         "0",
-	Query:       "0",
-	User:        "0",
-	Base:        "0",
-	DDLSource:   []string{},
-	DMLSource:   []string{},
-	QuerySource: []string{},
-	Auditor:     []string{},
-}
-
-
 var C Config
 
 var JWT = ""
 
+var Host = ""
+
 var Grpc = ""
 
-var Host = ""
+var Conn *grpc.ClientConn
 
 var GloPer CoreGlobalConfiguration
 
